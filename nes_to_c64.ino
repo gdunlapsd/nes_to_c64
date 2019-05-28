@@ -1,12 +1,29 @@
 #include <EEPROM.h>
 
+/**
+ * This interfaces an NES or SNES controller to Atari- digital joystick ports.
+ * 
+ * Two joystick ports, autofire, and second button as UP are supported.
+ * 
+ * SELECT switches between joystick ports.
+ * START + Fire (NES button B, SNES button Y) toggles autofire on/off
+ * START + UP increases autofire rate
+ * START + DOWN descreases autofire rate
+ * START + Fire 2 (NES button A, SNES button X or B) toggles Fire 2 as UP
+ * 
+ * Settings are saved in EEPROM.
+ * 
+ */
+ 
 // Define persistant setting addresses
 #define SETTING_JOYPORT 0
 #define SETTING_FIRE2_UP sizeof(SETTING_JOYPORT)
 #define SETTING_AUTOFIRE (SETTING_FIRE2_UP + sizeof(SETTING_FIRE2_UP))
 #define SETTING_AUTOFIRE_COUNT_MAX (SETTING_AUTOFIRE + sizeof(SETTING_AUTOFIRE))
 
-#define DEFAULT_AUTOFIRE_COUNT_MAX 15
+#define DEFAULT_AUTOFIRE_COUNT_MAX 30
+#define AUTOFIRE_COUNT_MIN 15
+
 
 // Define pins used
 #define JOY1_UP 0
@@ -117,13 +134,13 @@ void setup() {
   setJoyPort(EEPROM.read(SETTING_JOYPORT));
   fire2Up = EEPROM.read(SETTING_FIRE2_UP);
   autoFire = EEPROM.read(SETTING_AUTOFIRE);
-  autoFireCountMax = EEPROM.read(SETTING_AUTOFIRE);
-  if (autoFireCountMax <= 0 || autoFireCountMax > DEFAULT_AUTOFIRE_COUNT_MAX) {
+  autoFireCountMax = EEPROM.read(SETTING_AUTOFIRE_COUNT_MAX);
+  if (autoFireCountMax < AUTOFIRE_COUNT_MIN || autoFireCountMax > DEFAULT_AUTOFIRE_COUNT_MAX) {
     autoFireCountMax = DEFAULT_AUTOFIRE_COUNT_MAX;
-    EEPROM.write(SETTING_AUTOFIRE, DEFAULT_AUTOFIRE_COUNT_MAX);
+    EEPROM.write(SETTING_AUTOFIRE_COUNT_MAX, DEFAULT_AUTOFIRE_COUNT_MAX);
   }
   
-  autoFireCount = 0;
+  autoFireCount = AUTOFIRE_COUNT_MIN;
   autoFirePress = true;
   
   // Initialize NES/SNES pins
@@ -164,7 +181,7 @@ void loop() {
     startFire1Pressed = false;
     autoFire = !autoFire;
     EEPROM.write(SETTING_AUTOFIRE, autoFire);
-    autoFireCount = 0;
+    autoFireCount = AUTOFIRE_COUNT_MIN;
     autoFirePress = true;
     joyRelease(joyFire1);
   }
@@ -175,9 +192,13 @@ void loop() {
     return;
   } else if (startUpPressed) {
     startUpPressed = false;
-    if (autoFireCountMax > 1) {
-      autoFireCountMax--;
-      EEPROM.write(SETTING_AUTOFIRE, autoFireCountMax);
+    if (autoFireCountMax > AUTOFIRE_COUNT_MIN) {
+      autoFireCountMax-=3;
+      // Extra range checking to facilitate playing with limit values
+      if (autoFireCountMax < AUTOFIRE_COUNT_MIN) {
+        autoFireCountMax = AUTOFIRE_COUNT_MIN;
+      }
+      EEPROM.write(SETTING_AUTOFIRE_COUNT_MAX, autoFireCountMax);
     }
   }
 
@@ -185,25 +206,29 @@ void loop() {
   if (nesStart && nesDown) {
     startDownPressed = true;
     return;
-  } else if (startUpPressed) {
+  } else if (startDownPressed) {
     startDownPressed = false;
     if (autoFireCountMax < DEFAULT_AUTOFIRE_COUNT_MAX) {
-      autoFireCountMax++;
-      EEPROM.write(SETTING_AUTOFIRE, autoFireCountMax);
+      autoFireCountMax+=3;
+      // Extra range checking to facilitate playing with limit values
+      if (autoFireCountMax > DEFAULT_AUTOFIRE_COUNT_MAX) {
+        autoFireCountMax = DEFAULT_AUTOFIRE_COUNT_MAX;
+      }
+      EEPROM.write(SETTING_AUTOFIRE_COUNT_MAX, autoFireCountMax);
     }
   }
   
   if (autoFire) {
     if (nesB) {
-      if (!autoFireCount) {
-        autoFireCount = autoFireCountMax;
+      if (autoFireCount <= AUTOFIRE_COUNT_MIN) {
+        autoFireCount = autoFireCountMax; // Restart the countdown
         joyState(joyFire1, autoFirePress);
-        autoFirePress = !autoFirePress;
+        autoFirePress = !autoFirePress; // Toggle fire pin
       }
       autoFireCount--;
     } else {
-      autoFireCount = 0;
-      autoFirePress = true;
+      autoFireCount = AUTOFIRE_COUNT_MIN;
+      autoFirePress = true; // Enable fire pin on next NES fire button press
       joyRelease(joyFire1);
     }
   } else {
