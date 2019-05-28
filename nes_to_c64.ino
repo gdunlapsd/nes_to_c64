@@ -86,6 +86,8 @@ int autoFireCountMax;
 int autoFirePress;
 
 // Initialize joystick pin
+// Simulate open collector; will be floating until set to output, which will
+// cause it to be held low.
 void initJoyPin(int pin) {
   pinMode(pin, INPUT);
   digitalWrite(pin, LOW);
@@ -109,6 +111,7 @@ void setJoyPort(int joyPort) {
     joyLeft = JOY2_LEFT;
     joyRight = JOY2_RIGHT;
   }
+  // Avoid unnecessary EEPROM writes
   if (currentJoyPort != joyPort) {
     currentJoyPort = joyPort;
     EEPROM.write(SETTING_JOYPORT, currentJoyPort);
@@ -136,6 +139,7 @@ void setup() {
   autoFire = EEPROM.read(SETTING_AUTOFIRE);
   autoFireCountMax = EEPROM.read(SETTING_AUTOFIRE_COUNT_MAX);
   if (autoFireCountMax < AUTOFIRE_COUNT_MIN || autoFireCountMax > DEFAULT_AUTOFIRE_COUNT_MAX) {
+    // Correct out of range value
     autoFireCountMax = DEFAULT_AUTOFIRE_COUNT_MAX;
     EEPROM.write(SETTING_AUTOFIRE_COUNT_MAX, DEFAULT_AUTOFIRE_COUNT_MAX);
   }
@@ -223,7 +227,7 @@ void loop() {
       if (autoFireCount <= AUTOFIRE_COUNT_MIN) {
         autoFireCount = autoFireCountMax; // Restart the countdown
         joyState(joyFire1, autoFirePress);
-        autoFirePress = !autoFirePress; // Toggle fire pin
+        autoFirePress = !autoFirePress; // Toggle firing status
       }
       autoFireCount--;
     } else {
@@ -257,10 +261,12 @@ void joyState(int pin, boolean state) {
 }
 
 void joyPress(int pin) {
+  // Pin held low
   pinMode(pin, OUTPUT);
 }
 
 void joyRelease(int pin) {
+  // Pin floating
   pinMode(pin, INPUT);
 }
 
