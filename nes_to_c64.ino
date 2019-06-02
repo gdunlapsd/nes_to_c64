@@ -19,12 +19,12 @@
 #define SETTING_JOYPORT 0
 #define SETTING_FIRE2_UP sizeof(SETTING_JOYPORT)
 #define SETTING_AUTOFIRE (SETTING_FIRE2_UP + sizeof(SETTING_FIRE2_UP))
-#define SETTING_AUTOFIRE_COUNT_MAX (SETTING_AUTOFIRE + sizeof(SETTING_AUTOFIRE))
-#define SETTING_SNES_MODE (SETTING_AUTOFIRE_COUNT_MAX + sizeof(SETTING_AUTOFIRE_COUNT_MAX))
+#define SETTING_AUTOFIRE_RATE_MILLIS_MAX (SETTING_AUTOFIRE + sizeof(SETTING_AUTOFIRE))
+#define SETTING_SNES_MODE (SETTING_AUTOFIRE_RATE_MILLIS_MAX + sizeof(SETTING_AUTOFIRE_RATE_MILLIS_MAX))
 
-#define DEFAULT_AUTOFIRE_COUNT_MAX 30 // 300 millis?
-#define AUTOFIRE_COUNT_MIN 15 // 150 millis?
-
+#define AUTOFIRE_RATE_MILLIS_MAX 150
+#define AUTOFIRE_RATE_MILLIS_MIN 100
+#define AUTOFIRE_RATE_ADJUST_DELTA 10;
 
 // Define pins used
 #define JOY1_UP 0
@@ -82,11 +82,13 @@ int joyDown;
 int joyLeft;
 int joyRight;
 
-int autoFireCount;
-int autoFireCountMax;
-int autoFirePress;
+unsigned long autoFireStateMillis;
+unsigned long autoFireRateMillis;
+boolean autoFirePress = true; // Enable fire pin on next NES fire button press
 
 int currentJoyPort;
+
+unsigned long currentMillis;
 
 typedef struct {
   boolean *specialButton;
@@ -188,17 +190,17 @@ void setup() {
   currentJoyPort = EEPROM.read(SETTING_JOYPORT);
   fire2Up = EEPROM.read(SETTING_FIRE2_UP);
   autoFire = EEPROM.read(SETTING_AUTOFIRE);
-  autoFireCountMax = EEPROM.read(SETTING_AUTOFIRE_COUNT_MAX);
-  if (autoFireCountMax < AUTOFIRE_COUNT_MIN || autoFireCountMax > DEFAULT_AUTOFIRE_COUNT_MAX) {
+  autoFireRateMillis = EEPROM.read(SETTING_AUTOFIRE_RATE_MILLIS_MAX);
+  if (autoFireRateMillis < AUTOFIRE_RATE_MILLIS_MAX || autoFireRateMillis > AUTOFIRE_RATE_MILLIS_MAX) {
     // Correct out of range value
-    autoFireCountMax = DEFAULT_AUTOFIRE_COUNT_MAX;
-    EEPROM.write(SETTING_AUTOFIRE_COUNT_MAX, DEFAULT_AUTOFIRE_COUNT_MAX);
+    autoFireRateMillis = AUTOFIRE_RATE_MILLIS_MAX;
+    EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS_MAX, AUTOFIRE_RATE_MILLIS_MAX);
   }
   snesMode = EEPROM.read(SETTING_SNES_MODE);
 
   setJoyPort(currentJoyPort);
 
-  autoFireCount = AUTOFIRE_COUNT_MIN;
+  autoFireStateMillis = 0;
   autoFirePress = true;
 
   setupSettingCombos();
@@ -214,6 +216,8 @@ void setup() {
 }
 
 void loop() {
+  currentMillis = millis();
+
   nesReadButtons();
 
   // Handle special button combos
@@ -230,14 +234,15 @@ void loop() {
   
   if (autoFire) {
     if (nesFire1) {
-      if (autoFireCount <= AUTOFIRE_COUNT_MIN) {
-        autoFireCount = autoFireCountMax; // Restart the countdown
+      if (autoFireStateMillis == 0) {
+        autoFireStateMillis = currentMillis;
+      } else if ((currentMillis - autoFireStateMillis) >= autoFireRateMillis) {
+        autoFireStateMillis = currentMillis;
         joyState(joyFire1, autoFirePress);
         autoFirePress = !autoFirePress; // Toggle firing status
       }
-      autoFireCount--;
     } else {
-      autoFireCount = AUTOFIRE_COUNT_MIN;
+      autoFireStateMillis = 0;
       autoFirePress = true; // Enable fire pin on next NES fire button press
       joyRelease(joyFire1);
     }
@@ -334,30 +339,30 @@ void toggleFire2IsUp() {
 void toggleAutoFire() {
   autoFire = !autoFire;
   EEPROM.write(SETTING_AUTOFIRE, autoFire);
-  autoFireCount = AUTOFIRE_COUNT_MIN;
-  autoFirePress = true;
+  autoFireStateMillis = 0;
+  autoFirePress = true; // Enable fire pin on next NES fire button press
   joyRelease(joyFire1);
 }
 
 void increasFireRate() {
-  if (autoFireCountMax > AUTOFIRE_COUNT_MIN) {
-    autoFireCountMax-=3;
+  if (autoFireRateMillis > AUTOFIRE_RATE_MILLIS_MIN) {
+    autoFireRateMillis-=AUTOFIRE_RATE_ADJUST_DELTA;
     // Extra range checking to facilitate playing with limit values
-    if (autoFireCountMax < AUTOFIRE_COUNT_MIN) {
-      autoFireCountMax = AUTOFIRE_COUNT_MIN;
+    if (autoFireRateMillis < AUTOFIRE_RATE_MILLIS_MIN) {
+      autoFireRateMillis = AUTOFIRE_RATE_MILLIS_MIN;
     }
-    EEPROM.write(SETTING_AUTOFIRE_COUNT_MAX, autoFireCountMax);
+    EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS_MAX, autoFireRateMillis);
   }
 }
 
 void decreaseFireRate() {
-  if (autoFireCountMax < DEFAULT_AUTOFIRE_COUNT_MAX) {
-    autoFireCountMax+=3;
+  if (autoFireRateMillis < AUTOFIRE_RATE_MILLIS_MAX) {
+    autoFireRateMillis+=AUTOFIRE_RATE_ADJUST_DELTA;
     // Extra range checking to facilitate playing with limit values
-    if (autoFireCountMax > DEFAULT_AUTOFIRE_COUNT_MAX) {
-      autoFireCountMax = DEFAULT_AUTOFIRE_COUNT_MAX;
+    if (autoFireRateMillis > AUTOFIRE_RATE_MILLIS_MAX) {
+      autoFireRateMillis = AUTOFIRE_RATE_MILLIS_MAX;
     }
-    EEPROM.write(SETTING_AUTOFIRE_COUNT_MAX, autoFireCountMax);
+    EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS_MAX, autoFireRateMillis);
   }
 }
 
