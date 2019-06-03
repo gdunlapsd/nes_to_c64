@@ -3,13 +3,15 @@
 /**
  * This interfaces an NES or SNES controller to Atari- digital joystick ports.
  * 
- * Two joystick ports, autofire, and second button as UP are supported.
+ * Two joystick ports, autofire, and second fire button as UP are supported.
  * 
- * SELECT switches between joystick ports.
- * START + Fire (NES button B, SNES button Y) toggles autofire on/off
- * START + UP increases autofire rate
- * START + DOWN descreases autofire rate
- * START + Fire 2 (NES button A, SNES button X or B) toggles Fire 2 as UP
+ * SELECT + LEFT switches to the first joystick port.
+ * SELECT + RIGHT switches to the second joystick port.
+ * START + a Fire button toggles autofire on/off for that button.
+ * START + UP increases autofire rate.
+ * START + DOWN descreases autofire rate.
+ * SELECT + Fire button 2 toggles Fire 2 as UP; when in that mode, autofire is disabled for that button.
+ * SELECT + START switches between NES and SNES mode.
  * 
  * Settings are saved in EEPROM.
  * 
@@ -18,13 +20,15 @@
 // Define persistant setting addresses
 #define SETTING_JOYPORT 0
 #define SETTING_FIRE2_UP sizeof(SETTING_JOYPORT)
-#define SETTING_AUTOFIRE (SETTING_FIRE2_UP + sizeof(SETTING_FIRE2_UP))
-#define SETTING_AUTOFIRE_RATE_MILLIS_MAX (SETTING_AUTOFIRE + sizeof(SETTING_AUTOFIRE))
+#define SETTING_AUTOFIRE1 (SETTING_FIRE2_UP + sizeof(SETTING_FIRE2_UP))
+#define SETTING_AUTOFIRE2 (SETTING_AUTOFIRE1 + sizeof(SETTING_AUTOFIRE1))
+#define SETTING_AUTOFIRE_RATE_MILLIS_MAX (SETTING_AUTOFIRE2 + sizeof(SETTING_AUTOFIRE2))
 #define SETTING_SNES_MODE (SETTING_AUTOFIRE_RATE_MILLIS_MAX + sizeof(SETTING_AUTOFIRE_RATE_MILLIS_MAX))
 
 #define AUTOFIRE_RATE_MILLIS_MAX 150
-#define AUTOFIRE_RATE_MILLIS_MIN 100
-#define AUTOFIRE_RATE_ADJUST_DELTA 10;
+#define AUTOFIRE_RATE_MILLIS_MIN 50
+#define AUTOFIRE_RATE_ADJUST_DELTA 10
+#define BLINK_MILLIS 50
 
 // Define pins used
 #define JOY1_UP 0
@@ -71,9 +75,6 @@ boolean nesFire2 = false;
 // Assign nesFire1 and nesFire2 per SNES button layout if true
 boolean snesMode;
 
-boolean fire2Up;
-boolean autoFire;
-
 // Variables for pins of currently-selected joystick port
 int joyFire1;
 int joyFire2;
@@ -82,13 +83,15 @@ int joyDown;
 int joyLeft;
 int joyRight;
 
-unsigned long autoFireStateMillis;
 unsigned long autoFireRateMillis;
-boolean autoFirePress = true; // Enable fire pin on next NES fire button press
 
 int currentJoyPort;
+int currentJoyLED;
 
-unsigned long currentMillis;
+unsigned long blinkMillis = 0;
+
+unsigned long currentMillis = 0;
+
 
 typedef struct {
   boolean *specialButton;
@@ -97,8 +100,23 @@ typedef struct {
   void (*handler)();
 } SettingCombo;
 
-const int NUM_COMBOS = 7;
+const int NUM_COMBOS = 8;
 SettingCombo settingCombos[NUM_COMBOS];
+
+typedef struct {
+  boolean *nesFireButton;
+  int *joyFire;
+  boolean fireIsUp;
+  boolean autoFire;       // Current autofire setting
+  boolean autoFirePress;
+  unsigned long autoFireStateMillis;
+  int autoFireSetting;    // EEPROM setting address
+  boolean blinked = false;
+} FireButton;
+
+const int NUM_FIRE_BUTTONS = 2;
+FireButton fireButtons[NUM_FIRE_BUTTONS];
+
 
 void setupSettingCombos() {
   settingCombos[0].specialButton = &nesStart;
@@ -111,23 +129,44 @@ void setupSettingCombos() {
 
   settingCombos[2].specialButton = &nesStart;
   settingCombos[2].comboButton = &nesFire1;
-  settingCombos[2].handler = toggleAutoFire;
-  
+  settingCombos[2].handler = toggleAutoFire1;
+
   settingCombos[3].specialButton = &nesStart;
   settingCombos[3].comboButton = &nesFire2;
-  settingCombos[3].handler = toggleFire2IsUp;
-
+  settingCombos[3].handler = toggleAutoFire2;
+  
   settingCombos[4].specialButton = &nesSelect;
-  settingCombos[4].comboButton = &nesLeft;
-  settingCombos[4].handler = setJoyPort0;
+  settingCombos[4].comboButton = &nesFire2;
+  settingCombos[4].handler = toggleFire2IsUp;
 
   settingCombos[5].specialButton = &nesSelect;
-  settingCombos[5].comboButton = &nesRight;
-  settingCombos[5].handler = setJoyPort1;
+  settingCombos[5].comboButton = &nesLeft;
+  settingCombos[5].handler = setJoyPort0;
 
   settingCombos[6].specialButton = &nesSelect;
-  settingCombos[6].comboButton = &nesStart;
-  settingCombos[6].handler = toggleSnesMode;
+  settingCombos[6].comboButton = &nesRight;
+  settingCombos[6].handler = setJoyPort1;
+
+  settingCombos[7].specialButton = &nesSelect;
+  settingCombos[7].comboButton = &nesStart;
+  settingCombos[7].handler = toggleSnesMode;
+}
+
+
+void setupFireButtons() {
+  fireButtons[0].autoFireSetting = SETTING_AUTOFIRE1;
+  fireButtons[0].nesFireButton = &nesFire1;
+  fireButtons[0].joyFire = &joyFire1;
+  fireButtons[0].autoFire = EEPROM.read(fireButtons[0].autoFireSetting);
+  fireButtons[0].autoFireStateMillis = 0;
+  fireButtons[0].fireIsUp = false;
+
+  fireButtons[1].autoFireSetting = SETTING_AUTOFIRE2;
+  fireButtons[1].nesFireButton = &nesFire2;
+  fireButtons[1].joyFire = &joyFire2;
+  fireButtons[1].autoFire = EEPROM.read(fireButtons[1].autoFireSetting);
+  fireButtons[1].autoFireStateMillis = 0;
+  fireButtons[1].fireIsUp = EEPROM.read(SETTING_FIRE2_UP);
 }
 
 // Initialize joystick pin
@@ -149,6 +188,7 @@ void setJoyPort(int joyPort) {
     joyRight = JOY1_RIGHT;
     digitalWrite(JOYPORT_0_LED, HIGH);
     digitalWrite(JOYPORT_1_LED, LOW);
+    currentJoyLED = JOYPORT_0_LED;
   } else {
     joyPort = 1; // Ensure it's normalized as 0 or 1
     joyFire1 = JOY2_FIRE1;
@@ -159,6 +199,7 @@ void setJoyPort(int joyPort) {
     joyRight = JOY2_RIGHT;
     digitalWrite(JOYPORT_0_LED, LOW);
     digitalWrite(JOYPORT_1_LED, HIGH);
+    currentJoyLED = JOYPORT_1_LED;
   }
   // Avoid unnecessary EEPROM writes
   if (currentJoyPort != joyPort) {
@@ -188,22 +229,20 @@ void setup() {
   
   // Settings from EEPROM
   currentJoyPort = EEPROM.read(SETTING_JOYPORT);
-  fire2Up = EEPROM.read(SETTING_FIRE2_UP);
-  autoFire = EEPROM.read(SETTING_AUTOFIRE);
+  
   autoFireRateMillis = EEPROM.read(SETTING_AUTOFIRE_RATE_MILLIS_MAX);
-  if (autoFireRateMillis < AUTOFIRE_RATE_MILLIS_MAX || autoFireRateMillis > AUTOFIRE_RATE_MILLIS_MAX) {
-    // Correct out of range value
+  if (autoFireRateMillis < AUTOFIRE_RATE_MILLIS_MIN) {
+    autoFireRateMillis = AUTOFIRE_RATE_MILLIS_MIN;
+    EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS_MAX, autoFireRateMillis);
+  }  
+  if (autoFireRateMillis > AUTOFIRE_RATE_MILLIS_MAX) {
     autoFireRateMillis = AUTOFIRE_RATE_MILLIS_MAX;
-    EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS_MAX, AUTOFIRE_RATE_MILLIS_MAX);
+    EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS_MAX, autoFireRateMillis);
   }
+  
   snesMode = EEPROM.read(SETTING_SNES_MODE);
 
   setJoyPort(currentJoyPort);
-
-  autoFireStateMillis = 0;
-  autoFirePress = true;
-
-  setupSettingCombos();
 
   // Initialize NES/SNES pins
   pinMode(NES_DATA, INPUT);
@@ -213,6 +252,9 @@ void setup() {
   pinMode(NES_CLOCK, OUTPUT);
   digitalWrite(NES_CLOCK, LOW);
   delay(100);
+
+  setupSettingCombos();
+  setupFireButtons();
 }
 
 void loop() {
@@ -231,36 +273,66 @@ void loop() {
       combo->handler();
     }
   }
-  
-  if (autoFire) {
-    if (nesFire1) {
-      if (autoFireStateMillis == 0) {
-        autoFireStateMillis = currentMillis;
-      } else if ((currentMillis - autoFireStateMillis) >= autoFireRateMillis) {
-        autoFireStateMillis = currentMillis;
-        joyState(joyFire1, autoFirePress);
-        autoFirePress = !autoFirePress; // Toggle firing status
+
+  for (int i=0; i < NUM_FIRE_BUTTONS; i++) {
+    FireButton *fireButton = &fireButtons[i];
+    if (!fireButton->fireIsUp) {
+      if (fireButton->autoFire && *(fireButton->nesFireButton)) {
+        if (fireButton->autoFireStateMillis == 0) {
+          // Autofire just starting
+          fireButton->autoFireStateMillis = currentMillis;
+          fireButton->autoFirePress = true;
+          joyFire(fireButton, true);
+        } else if ((currentMillis - fireButton->autoFireStateMillis) >= autoFireRateMillis) {
+          fireButton->autoFireStateMillis = currentMillis;
+          fireButton->autoFirePress = !fireButton->autoFirePress; // Toggle firing status
+          joyFire(fireButton, fireButton->autoFirePress);
+        }
+      } else {
+        fireButton->autoFireStateMillis = 0;
+        joyFire(fireButton, *(fireButton->nesFireButton));
       }
-    } else {
-      autoFireStateMillis = 0;
-      autoFirePress = true; // Enable fire pin on next NES fire button press
-      joyRelease(joyFire1);
     }
-  } else {
-    joyState(joyFire1, nesFire1);
   }
   
-  if (fire2Up) {
+  if (fireButtons[1].fireIsUp) {
     joyRelease(joyFire2);
     joyState(joyUp, nesUp || nesFire2);
   } else {
-    joyState(joyFire2, nesFire2);
     joyState(joyUp, nesUp);
   }
   
   joyState(joyDown, nesDown);
   joyState(joyLeft, nesLeft || snesL);
   joyState(joyRight, nesRight || snesR);
+
+  endJoyBlink();
+}
+
+void startJoyBlink() {
+  if (blinkMillis == 0) {
+    digitalWrite(currentJoyLED, LOW);
+    blinkMillis = currentMillis;
+  }
+}
+void endJoyBlink() {
+  if (blinkMillis > 0 && (currentMillis - blinkMillis >= BLINK_MILLIS)) {
+    blinkMillis = 0;
+    digitalWrite(currentJoyLED, HIGH);
+  }
+}
+
+// Blink the LED when firing
+void joyFire(FireButton *fireButton, boolean state) {
+  joyState(*(fireButton->joyFire), state);
+  if (state) {
+    if (!fireButton->blinked) {
+      fireButton->blinked = true;
+      startJoyBlink();
+    }
+  } else {
+    fireButton->blinked = false;
+  }
 }
 
 void joyState(int pin, boolean state) {
@@ -306,10 +378,13 @@ void nesReadButtons() {
   nesDown = nesRead();
   nesLeft = nesRead();
   nesRight = nesRead();
-  snesA = nesRead();
-  snesX = nesRead();
-  snesL = nesRead();
-  snesR = nesRead();
+
+  if (snesMode) {
+    snesA = nesRead();
+    snesX = nesRead();
+    snesL = nesRead();
+    snesR = nesRead();
+  }
 
   if (snesMode) {
     nesFire1 = snesB;
@@ -332,22 +407,26 @@ boolean nesRead() {
 // Settings handlers
 
 void toggleFire2IsUp() {
-  fire2Up = !fire2Up;
-  EEPROM.write(SETTING_FIRE2_UP, fire2Up);
+  fireButtons[1].fireIsUp = !fireButtons[1].fireIsUp;
+  EEPROM.write(SETTING_FIRE2_UP, fireButtons[1].fireIsUp);
 }
 
-void toggleAutoFire() {
-  autoFire = !autoFire;
-  EEPROM.write(SETTING_AUTOFIRE, autoFire);
-  autoFireStateMillis = 0;
-  autoFirePress = true; // Enable fire pin on next NES fire button press
-  joyRelease(joyFire1);
+void toggleAutoFire1() {
+  toggleAutoFire(0);
+}
+void toggleAutoFire2() {
+  toggleAutoFire(1);
+}
+void toggleAutoFire(int fireButton) {
+  fireButtons[fireButton].autoFire = !fireButtons[fireButton].autoFire;
+  EEPROM.write(fireButtons[fireButton].autoFireSetting, fireButtons[fireButton].autoFire);
+  fireButtons[fireButton].autoFireStateMillis = 0;
+  joyRelease(*(fireButtons[fireButton].joyFire));
 }
 
 void increasFireRate() {
   if (autoFireRateMillis > AUTOFIRE_RATE_MILLIS_MIN) {
     autoFireRateMillis-=AUTOFIRE_RATE_ADJUST_DELTA;
-    // Extra range checking to facilitate playing with limit values
     if (autoFireRateMillis < AUTOFIRE_RATE_MILLIS_MIN) {
       autoFireRateMillis = AUTOFIRE_RATE_MILLIS_MIN;
     }
@@ -358,7 +437,6 @@ void increasFireRate() {
 void decreaseFireRate() {
   if (autoFireRateMillis < AUTOFIRE_RATE_MILLIS_MAX) {
     autoFireRateMillis+=AUTOFIRE_RATE_ADJUST_DELTA;
-    // Extra range checking to facilitate playing with limit values
     if (autoFireRateMillis > AUTOFIRE_RATE_MILLIS_MAX) {
       autoFireRateMillis = AUTOFIRE_RATE_MILLIS_MAX;
     }
