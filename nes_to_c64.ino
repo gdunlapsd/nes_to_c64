@@ -280,9 +280,13 @@ void loop() {
     }
   }
 
+  boolean fireUp = false;
   for (int i=0; i < NUM_FIRE_BUTTONS; i++) {
     FireButton *fireButton = &fireButtons[i];
-    if (!fireButton->fireIsUp) {
+    if (fireButton->fireIsUp) {
+      joyRelease(*(fireButton->joyFire));
+      fireUp = *(fireButton->nesFireButton);
+    } else {
       if (fireButton->autoFire && *(fireButton->nesFireButton)) {
         if (fireButton->autoFireStateMillis == 0) {
           // Autofire just starting
@@ -301,13 +305,7 @@ void loop() {
     }
   }
   
-  if (fireButtons[1].fireIsUp) {
-    joyRelease(joyFire2);
-    joyState(joyUp, nesUp || nesFire2);
-  } else {
-    joyState(joyUp, nesUp);
-  }
-  
+  joyState(joyUp, nesUp || fireUp);
   joyState(joyDown, nesDown);
   joyState(joyLeft, nesLeft || snesL);
   joyState(joyRight, nesRight || snesR);
