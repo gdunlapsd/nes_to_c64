@@ -3,6 +3,10 @@
 /**
  * This interfaces an NES or SNES controller to Atari- digital joystick ports.
  * 
+ * The type of controller (NES or SNES) is autodetected; tested with genuine Nintendo
+ * NES, SNES, and NES Advantage controllers.
+ * Third party controllers have not been tested; YMMV.
+ * 
  * Two joystick ports, autofire, and second fire button as UP are supported.
  * 
  * SELECT + LEFT switches to the first joystick port.
@@ -10,8 +14,7 @@
  * START + a Fire button toggles autofire on/off for that button.
  * START + UP increases autofire rate.
  * START + DOWN descreases autofire rate.
- * SELECT + Fire button 2 toggles Fire 2 as UP; when in that mode, autofire is disabled for that button.
- * SELECT + START switches between NES and SNES mode.
+ * SELECT + UP toggles Fire 2 as UP; when in that mode, autofire is disabled for that button.
  * 
  * Settings are saved in EEPROM.
  * 
@@ -23,7 +26,6 @@
 #define SETTING_AUTOFIRE1 (SETTING_FIRE2_UP + sizeof(SETTING_FIRE2_UP))
 #define SETTING_AUTOFIRE2 (SETTING_AUTOFIRE1 + sizeof(SETTING_AUTOFIRE1))
 #define SETTING_AUTOFIRE_RATE_MILLIS_MAX (SETTING_AUTOFIRE2 + sizeof(SETTING_AUTOFIRE2))
-#define SETTING_SNES_MODE (SETTING_AUTOFIRE_RATE_MILLIS_MAX + sizeof(SETTING_AUTOFIRE_RATE_MILLIS_MAX))
 
 #define AUTOFIRE_RATE_MILLIS_MAX 150
 #define AUTOFIRE_RATE_MILLIS_MIN 50
@@ -31,22 +33,22 @@
 #define BLINK_MILLIS 50
 
 // Define pins used
-#define JOY1_UP 0
-#define JOY1_DOWN 1
-#define JOY1_LEFT 2
-#define JOY1_RIGHT 3
-#define JOY1_FIRE1 4
-#define JOY1_FIRE2 5
+#define JOY1_UP 2
+#define JOY1_DOWN 3
+#define JOY1_LEFT 4
+#define JOY1_RIGHT 5
+#define JOY1_FIRE1 6
+#define JOY1_FIRE2 7
 
-#define JOY2_UP 6
-#define JOY2_DOWN 7
-#define JOY2_LEFT 8
-#define JOY2_RIGHT 9
-#define JOY2_FIRE1 10
-#define JOY2_FIRE2 11
+#define JOY2_UP 8
+#define JOY2_DOWN 9
+#define JOY2_LEFT 10
+#define JOY2_RIGHT 11
+#define JOY2_FIRE1 12
+#define JOY2_FIRE2 13
 
-#define JOYPORT_0_LED 12
-#define JOYPORT_1_LED 13
+#define JOYPORT_0_LED A4
+#define JOYPORT_1_LED A5
 
 #define NES_CLOCK A0
 #define NES_LATCH A1
@@ -72,8 +74,8 @@ boolean snesR = false;
 boolean nesFire1 = false;
 boolean nesFire2 = false;
 
-// Assign nesFire1 and nesFire2 per SNES button layout if true
-boolean snesMode;
+// Assign nesFire1 and nesFire2 per SNES button layout if true. Will be autodetected.
+boolean snesMode = false;
 
 // Variables for pins of currently-selected joystick port
 int joyFire1;
@@ -100,7 +102,7 @@ typedef struct {
   void (*handler)();
 } SettingCombo;
 
-const int NUM_COMBOS = 8;
+const int NUM_COMBOS = 7;
 SettingCombo settingCombos[NUM_COMBOS];
 
 typedef struct {
@@ -136,7 +138,7 @@ void setupSettingCombos() {
   settingCombos[3].handler = toggleAutoFire2;
   
   settingCombos[4].specialButton = &nesSelect;
-  settingCombos[4].comboButton = &nesFire2;
+  settingCombos[4].comboButton = &nesUp;
   settingCombos[4].handler = toggleFire2IsUp;
 
   settingCombos[5].specialButton = &nesSelect;
@@ -146,10 +148,6 @@ void setupSettingCombos() {
   settingCombos[6].specialButton = &nesSelect;
   settingCombos[6].comboButton = &nesRight;
   settingCombos[6].handler = setJoyPort1;
-
-  settingCombos[7].specialButton = &nesSelect;
-  settingCombos[7].comboButton = &nesStart;
-  settingCombos[7].handler = toggleSnesMode;
 }
 
 
@@ -240,8 +238,6 @@ void setup() {
     EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS_MAX, autoFireRateMillis);
   }
   
-  snesMode = EEPROM.read(SETTING_SNES_MODE);
-
   setJoyPort(currentJoyPort);
 
   // Initialize NES/SNES pins
@@ -379,17 +375,19 @@ void nesReadButtons() {
   nesLeft = nesRead();
   nesRight = nesRead();
 
-  if (snesMode) {
-    snesA = nesRead();
-    snesX = nesRead();
-    snesL = nesRead();
-    snesR = nesRead();
-  }
+  snesA = nesRead();
+  snesX = nesRead();
+  snesL = nesRead();
+  snesR = nesRead();
 
+  // NES controller will read these as all true
+  snesMode = !(snesA && snesX && snesL && snesR);
+  
   if (snesMode) {
     nesFire1 = snesB;
     nesFire2 = snesA;
   } else {
+    snesA = snesX = snesL = snesR = false;
     nesFire1 = nesB;
     nesFire2 = nesA;
   }
@@ -449,8 +447,4 @@ void setJoyPort0() {
 }
 void setJoyPort1() {
   setJoyPort(1);
-}
-
-void toggleSnesMode() {
-  snesMode = !snesMode;  
 }
