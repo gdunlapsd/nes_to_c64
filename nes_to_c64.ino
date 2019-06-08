@@ -1,7 +1,7 @@
 #include <EEPROM.h>
 
 /**
- * This interfaces an NES or SNES controller to Atari- digital joystick ports.
+ * This interfaces an NES or SNES controller to Atari-style digital joystick ports.
  * 
  * The type of controller (NES or SNES) is autodetected; tested with genuine Nintendo
  * NES, SNES, and NES Advantage controllers.
@@ -15,6 +15,7 @@
  * START + UP increases autofire rate.
  * START + DOWN descreases autofire rate.
  * SELECT + UP toggles Fire 2 as UP; when in that mode, autofire is disabled for that button.
+ * SELETE + a FIRE button (A or B) will make that the primary fire button and the other one the secondary.
  * 
  * Settings are saved in EEPROM.
  * 
@@ -26,6 +27,7 @@
 #define SETTING_AUTOFIRE1 (SETTING_FIRE2_UP + sizeof(SETTING_FIRE2_UP))
 #define SETTING_AUTOFIRE2 (SETTING_AUTOFIRE1 + sizeof(SETTING_AUTOFIRE1))
 #define SETTING_AUTOFIRE_RATE_MILLIS_MAX (SETTING_AUTOFIRE2 + sizeof(SETTING_AUTOFIRE2))
+#define SETTING_FIRE_REVERSED (SETTING_AUTOFIRE_RATE_MILLIS_MAX + sizeof(SETTING_AUTOFIRE_RATE_MILLIS_MAX))
 
 #define AUTOFIRE_RATE_MILLIS_MAX 150
 #define AUTOFIRE_RATE_MILLIS_MIN 50
@@ -77,6 +79,9 @@ boolean nesFire2 = false;
 // Assign nesFire1 and nesFire2 per SNES button layout if true. Will be autodetected.
 boolean snesMode = false;
 
+// Fire buttons are reversed from default
+boolean fireReversed;
+
 // Variables for pins of currently-selected joystick port
 int joyFire1;
 int joyFire2;
@@ -102,7 +107,7 @@ typedef struct {
   void (*handler)();
 } SettingCombo;
 
-const int NUM_COMBOS = 7;
+const int NUM_COMBOS = 8;
 SettingCombo settingCombos[NUM_COMBOS];
 
 typedef struct {
@@ -148,6 +153,10 @@ void setupSettingCombos() {
   settingCombos[6].specialButton = &nesSelect;
   settingCombos[6].comboButton = &nesRight;
   settingCombos[6].handler = setJoyPort1;
+
+  settingCombos[7].specialButton = &nesSelect;
+  settingCombos[7].comboButton = &nesFire2;
+  settingCombos[7].handler = toggleFireReversed;
 }
 
 
@@ -227,7 +236,8 @@ void setup() {
   
   // Settings from EEPROM
   currentJoyPort = EEPROM.read(SETTING_JOYPORT);
-  
+  fireReversed = EEPROM.read(SETTING_FIRE_REVERSED);
+
   autoFireRateMillis = EEPROM.read(SETTING_AUTOFIRE_RATE_MILLIS_MAX);
   if (autoFireRateMillis < AUTOFIRE_RATE_MILLIS_MIN) {
     autoFireRateMillis = AUTOFIRE_RATE_MILLIS_MIN;
@@ -384,12 +394,22 @@ void nesReadButtons() {
   snesMode = !(snesA && snesX && snesL && snesR);
   
   if (snesMode) {
-    nesFire1 = snesB;
-    nesFire2 = snesA;
+    if (fireReversed) {
+      nesFire1 = snesA;
+      nesFire2 = snesB;
+    } else {
+      nesFire1 = snesB;
+      nesFire2 = snesA;
+    }
   } else {
     snesA = snesX = snesL = snesR = false;
-    nesFire1 = nesB;
-    nesFire2 = nesA;
+    if (fireReversed) {
+      nesFire1 = nesA;
+      nesFire2 = nesB;
+    } else {
+      nesFire1 = nesB;
+      nesFire2 = nesA;      
+    }
   }
 
   delay(10);
@@ -447,4 +467,9 @@ void setJoyPort0() {
 }
 void setJoyPort1() {
   setJoyPort(1);
+}
+
+void toggleFireReversed() {
+  fireReversed = !fireReversed;
+  EEPROM.write(SETTING_FIRE_REVERSED, fireReversed);
 }
