@@ -394,22 +394,18 @@ void nesReadButtons() {
   snesMode = !(snesA && snesX && snesL && snesR);
   
   if (snesMode) {
-    if (fireReversed) {
-      nesFire1 = snesA;
-      nesFire2 = snesB;
-    } else {
-      nesFire1 = snesB;
-      nesFire2 = snesA;
-    }
+    nesFire1 = snesB;
+    nesFire2 = snesA;
   } else {
     snesA = snesX = snesL = snesR = false;
-    if (fireReversed) {
-      nesFire1 = nesA;
-      nesFire2 = nesB;
-    } else {
-      nesFire1 = nesB;
-      nesFire2 = nesA;      
-    }
+    nesFire1 = nesB;
+    nesFire2 = nesA;
+  }
+
+  if (fireReversed) {
+    boolean temp = nesFire1;
+    nesFire1 = nesFire2;
+    nesFire2 = temp;
   }
 
   delay(10);
