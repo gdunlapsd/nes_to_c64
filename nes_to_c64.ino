@@ -1,13 +1,18 @@
 #include <EEPROM.h>
 
 /**
- * This interfaces an NES or SNES controller to Atari-style digital joystick ports.
+ * NES/SNES to Atari Joystick converter
+ * By Greg Dunlap, 2019
  * 
- * The type of controller (NES or SNES) is autodetected; tested with genuine Nintendo
- * NES, SNES, and NES Advantage controllers.
+ * This interfaces an NES or SNES controller, or SNES mouse, to Atari-style digital joystick ports.
+ * 
+ * The type of controller (NES or SNES, or SNES Mouse) is autodetected; tested with genuine Nintendo
+ * NES, SNES, and NES Advantage controllers, and the SNES mouse.
  * Third party controllers have not been tested; YMMV.
  * 
  * Two joystick ports, autofire, and second fire button as UP are supported.
+ * 
+ * The SNES mouse emulates joystick movements. Left button is FIRE 1 and right button is FIRE 2.
  * 
  * SELECT + LEFT switches to the first joystick port.
  * SELECT + RIGHT switches to the second joystick port.
@@ -34,6 +39,8 @@
 #define AUTOFIRE_RATE_ADJUST_DELTA 10
 #define BLINK_MILLIS 50
 
+#define MOUSE_MOVEMENT_THRESHOLD 1
+
 // Define pins used
 #define JOY2_UP 2
 #define JOY2_DOWN 3
@@ -57,30 +64,33 @@
 #define NES_DATA A2
 
 // Variables for controller button states
-boolean nesA = false;
-boolean nesB = false;
-boolean nesSelect = false;
-boolean nesStart = false;
-boolean nesUp = false;
-boolean nesDown = false;
-boolean nesLeft = false;
-boolean nesRight = false;
-boolean snesA = false;
-boolean snesB = false;
-boolean snesX = false;
-boolean snesY = false;
-boolean snesL = false;
-boolean snesR = false;
+bool nesA = false;
+bool nesB = false;
+bool nesStart = false;
+bool nesSelect = false;
+bool nesUp = false;
+bool nesDown = false;
+bool nesLeft = false;
+bool nesRight = false;
+bool snesA = false;
+bool snesB = false;
+bool snesX = false;
+bool snesY = false;
+bool snesL = false;
+bool snesR = false;
 
 // Logical buttons states for fire buttons 1 and 2
-boolean nesFire1 = false;
-boolean nesFire2 = false;
+bool nesFire1 = false;
+bool nesFire2 = false;
 
 // Assign nesFire1 and nesFire2 per SNES button layout if true. Will be autodetected.
-boolean snesMode = false;
+bool snesMode = false;
+
+// SNES mouse is connected
+bool snesMouse = false;
 
 // Fire buttons are reversed from default
-boolean fireReversed;
+bool fireReversed;
 
 // Variables for pins of currently-selected joystick port
 int joyFire1;
@@ -90,20 +100,23 @@ int joyDown;
 int joyLeft;
 int joyRight;
 
-unsigned long autoFireRateMillis;
-
 int currentJoyPort;
 int currentJoyLED;
 
-unsigned long blinkMillis = 0;
+bool mouseDirY;
+unsigned char mouseDY; 
+bool mouseDirX;
+unsigned char mouseDX;
 
 unsigned long currentMillis = 0;
+unsigned long autoFireRateMillis;
+unsigned long blinkMillis = 0;
 
 
 typedef struct {
-  boolean *specialButton;
-  boolean *comboButton;
-  boolean comboPressed = false;
+  bool *specialButton;
+  bool *comboButton;
+  bool comboPressed = false;
   void (*handler)();
 } SettingCombo;
 
@@ -111,14 +124,14 @@ const int NUM_COMBOS = 8;
 SettingCombo settingCombos[NUM_COMBOS];
 
 typedef struct {
-  boolean *nesFireButton;
+  bool *nesFireButton;
   int *joyFire;
-  boolean fireIsUp;
-  boolean autoFire;       // Current autofire setting
-  boolean autoFirePress;
+  bool fireIsUp;
+  bool autoFire;       // Current autofire setting
+  bool autoFirePress;
   unsigned long autoFireStateMillis;
   int autoFireSetting;    // EEPROM setting address
-  boolean blinked = false;
+  bool blinked = false;
 } FireButton;
 
 const int NUM_FIRE_BUTTONS = 2;
@@ -267,7 +280,7 @@ void loop() {
   currentMillis = millis();
 
   nesReadButtons();
-
+  
   // Handle special button combos
   for (int i = 0; i < NUM_COMBOS; i++) {
     SettingCombo *combo = &settingCombos[i];
@@ -280,7 +293,7 @@ void loop() {
     }
   }
 
-  boolean fireUp = false;
+  bool fireUp = false;
   for (int i=0; i < NUM_FIRE_BUTTONS; i++) {
     FireButton *fireButton = &fireButtons[i];
     if (fireButton->fireIsUp) {
@@ -309,7 +322,7 @@ void loop() {
   joyState(joyDown, nesDown);
   joyState(joyLeft, nesLeft || snesL);
   joyState(joyRight, nesRight || snesR);
-
+    
   endJoyBlink();
 }
 
@@ -327,7 +340,7 @@ void endJoyBlink() {
 }
 
 // Blink the LED when firing
-void joyFire(FireButton *fireButton, boolean state) {
+void joyFire(FireButton *fireButton, bool state) {
   joyState(*(fireButton->joyFire), state);
   if (state) {
     if (!fireButton->blinked) {
@@ -339,7 +352,7 @@ void joyFire(FireButton *fireButton, boolean state) {
   }
 }
 
-void joyState(int pin, boolean state) {
+void joyState(int pin, bool state) {
   if (state) {
     joyPress(pin);
   } else {
@@ -374,44 +387,83 @@ void nesReadButtons() {
   // Button order on NES is A B Select Start Up Down Left Right
   // Button order on SNES is B Y Select Start Up Down Left Right A X L R
   
-  nesA = snesB = nesRead();
-  nesB = snesY = nesRead();
-  nesSelect = nesRead();
-  nesStart = nesRead();
-  nesUp = nesRead();
-  nesDown = nesRead();
-  nesLeft = nesRead();
-  nesRight = nesRead();
+  nesA = snesB = nesRead();     // bit $00
+  nesB = snesY = nesRead();     // bit $01
+  nesSelect = nesRead();        // bit $02
+  nesStart = nesRead();         // bit $03
+  nesUp = nesRead();            // bit $04
+  nesDown = nesRead();          // bit $05
+  nesLeft = nesRead();          // bit $06  
+  nesRight = nesRead();         // bit $07
 
-  snesA = nesRead();
-  snesX = nesRead();
-  snesL = nesRead();
-  snesR = nesRead();
+  snesA = nesRead();            // bit $08
+  snesX = nesRead();            // bit $09
+  snesL = nesRead();            // bit $0A
+  snesR = nesRead();            // bit $0B
 
-  // NES controller will read these as all true
-  snesMode = !(snesA && snesX && snesL && snesR);
+  // Check fior SNES mouse signature, which  is 0001
+  int sig = 0;
+  sig += nesRead();             // bit $0C
+  sig += nesRead();             // bit $0D
+  sig += nesRead();             // bit $0E
+  snesMouse = ((sig == 0) && nesRead());  // bit $0F
+
+  if (snesMouse) {
+    mouseDirY = nesRead();      // bit $10
+    mouseDY = readMouseDelta(); // bits $11 - $17  
+    mouseDirX = nesRead();      // bit $18
+    mouseDX = readMouseDelta(); // bits $19 - $1F
   
-  if (snesMode) {
-    nesFire1 = snesB;
+    nesFire1 = snesX;
     nesFire2 = snesA;
-  } else {
-    snesA = snesX = snesL = snesR = false;
-    nesFire1 = nesB;
-    nesFire2 = nesA;
-  }
+    nesSelect = nesStart = snesL = snesR = false;
 
-  if (fireReversed) {
-    boolean temp = nesFire1;
-    nesFire1 = nesFire2;
-    nesFire2 = temp;
+    if (mouseDX > MOUSE_MOVEMENT_THRESHOLD) {
+      nesLeft = mouseDirX;    // Dir X 1 = LEFT
+      nesRight = !mouseDirX;   // Dir X 0 = RIGHT
+    }
+    if (mouseDY > MOUSE_MOVEMENT_THRESHOLD) {
+      nesUp = mouseDirY;    // Dir Y 1 = UP
+      nesDown = !mouseDirY;   // Dir Y 0 = DOWN
+    }
+  } else {
+    // NES controller will read these as all true
+    snesMode = !(snesA && snesX && snesL && snesR);
+    
+    if (snesMode) {
+      nesFire1 = snesB;
+      nesFire2 = snesA;
+    } else {
+      snesA = snesX = snesL = snesR = false;
+      nesFire1 = nesB;
+      nesFire2 = nesA;
+    }
+  
+    if (fireReversed) {
+      bool temp = nesFire1;
+      nesFire1 = nesFire2;
+      nesFire2 = temp;
+    }
   }
 
   delay(10);
 }
 
-boolean nesRead() {
+unsigned char readMouseDelta() {
+  unsigned char delta = 0;
+  delta |= (nesRead() << 6);
+  delta |= (nesRead() << 5);
+  delta |= (nesRead() << 4);
+  delta |= (nesRead() << 3);
+  delta |= (nesRead() << 2);
+  delta |= (nesRead() << 1);
+  delta |= nesRead();
+  return delta;
+}
+
+int nesRead() {
   // 0 means button pressed
-  boolean status = !digitalRead(NES_DATA);
+  int status = !digitalRead(NES_DATA);
   nesClock();
   return status;
 }
