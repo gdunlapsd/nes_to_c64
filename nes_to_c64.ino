@@ -26,8 +26,8 @@
 #define SETTING_FIRE2_UP sizeof(SETTING_JOYPORT)
 #define SETTING_AUTOFIRE1 (SETTING_FIRE2_UP + sizeof(SETTING_FIRE2_UP))
 #define SETTING_AUTOFIRE2 (SETTING_AUTOFIRE1 + sizeof(SETTING_AUTOFIRE1))
-#define SETTING_AUTOFIRE_RATE_MILLIS_MAX (SETTING_AUTOFIRE2 + sizeof(SETTING_AUTOFIRE2))
-#define SETTING_FIRE_REVERSED (SETTING_AUTOFIRE_RATE_MILLIS_MAX + sizeof(SETTING_AUTOFIRE_RATE_MILLIS_MAX))
+#define SETTING_AUTOFIRE_RATE_MILLIS (SETTING_AUTOFIRE2 + sizeof(SETTING_AUTOFIRE2))
+#define SETTING_FIRE_REVERSED (SETTING_AUTOFIRE_RATE_MILLIS + sizeof(SETTING_AUTOFIRE_RATE_MILLIS))
 
 #define AUTOFIRE_RATE_MILLIS_MAX 150
 #define AUTOFIRE_RATE_MILLIS_MIN 50
@@ -35,19 +35,19 @@
 #define BLINK_MILLIS 50
 
 // Define pins used
-#define JOY1_UP 2
-#define JOY1_DOWN 3
-#define JOY1_LEFT 4
-#define JOY1_RIGHT 5
-#define JOY1_FIRE1 6
-#define JOY1_FIRE2 7
+#define JOY2_UP 2
+#define JOY2_DOWN 3
+#define JOY2_LEFT 4
+#define JOY2_RIGHT 5
+#define JOY2_FIRE1 6
+#define JOY2_FIRE2 7
 
-#define JOY2_UP 8
-#define JOY2_DOWN 9
-#define JOY2_LEFT 10
-#define JOY2_RIGHT 11
-#define JOY2_FIRE1 12
-#define JOY2_FIRE2 13
+#define JOY1_UP 8
+#define JOY1_DOWN 9
+#define JOY1_LEFT 10
+#define JOY1_RIGHT 11
+#define JOY1_FIRE1 12
+#define JOY1_FIRE2 13
 
 #define JOYPORT_0_LED A4
 #define JOYPORT_1_LED A5
@@ -238,14 +238,14 @@ void setup() {
   currentJoyPort = EEPROM.read(SETTING_JOYPORT);
   fireReversed = EEPROM.read(SETTING_FIRE_REVERSED);
 
-  autoFireRateMillis = EEPROM.read(SETTING_AUTOFIRE_RATE_MILLIS_MAX);
+  autoFireRateMillis = EEPROM.read(SETTING_AUTOFIRE_RATE_MILLIS);
   if (autoFireRateMillis < AUTOFIRE_RATE_MILLIS_MIN) {
     autoFireRateMillis = AUTOFIRE_RATE_MILLIS_MIN;
-    EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS_MAX, autoFireRateMillis);
+    EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS, autoFireRateMillis);
   }  
   if (autoFireRateMillis > AUTOFIRE_RATE_MILLIS_MAX) {
     autoFireRateMillis = AUTOFIRE_RATE_MILLIS_MAX;
-    EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS_MAX, autoFireRateMillis);
+    EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS, autoFireRateMillis);
   }
   
   setJoyPort(currentJoyPort);
@@ -442,7 +442,7 @@ void increasFireRate() {
     if (autoFireRateMillis < AUTOFIRE_RATE_MILLIS_MIN) {
       autoFireRateMillis = AUTOFIRE_RATE_MILLIS_MIN;
     }
-    EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS_MAX, autoFireRateMillis);
+    EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS, autoFireRateMillis);
   }
 }
 
@@ -452,7 +452,7 @@ void decreaseFireRate() {
     if (autoFireRateMillis > AUTOFIRE_RATE_MILLIS_MAX) {
       autoFireRateMillis = AUTOFIRE_RATE_MILLIS_MAX;
     }
-    EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS_MAX, autoFireRateMillis);
+    EEPROM.write(SETTING_AUTOFIRE_RATE_MILLIS, autoFireRateMillis);
   }
 }
 
